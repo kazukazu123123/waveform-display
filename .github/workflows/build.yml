@@ -1,0 +1,63 @@
+name: build
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+  workflow_call:
+    inputs:
+      tag-name:
+        required: true
+        type: string
+
+env:
+  BINARY_NAME: waveform-display
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, x86_64-pc-windows-gnu]
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    defaults:
+      run:
+        shell: bash -xe {0}
+    steps:
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get install -y musl-tools --no-install-recommends
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: dtolnay/rust-toolchain@0e66bd3e6b38ec0ad5312288c83e47c143e6b09e # master
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@dd05243424bd5c0e585e4b55eb2d7615cdd32f1f # v2.5.1
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}
+            target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe
+      - name: Upload to release
+        if: ${{ inputs.tag-name }}
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          if [ -e ${{ env.BINARY_NAME }}.exe ]; then
+            filename="${{ env.BINARY_NAME }}-${{ inputs.tag-name }}-${{ matrix.target }}.exe"
+            mv ${{ env.BINARY_NAME }}.exe "$filename"
+            gh release upload ${{ inputs.tag-name }} "$filename"#${{ matrix.target }} --clobber
+          else
+            filename="${{ env.BINARY_NAME }}-${{ inputs.tag-name }}-${{ matrix.target }}"
+            mv ${{ env.BINARY_NAME }} "$filename"
+            gh release upload ${{ inputs.tag-name }} "$filename"#${{ matrix.target }} --clobber
+          fi
